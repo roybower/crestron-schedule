@@ -1,6 +1,8 @@
 # crestron-schedule
 
-SIMPL# Pro class with UI to trigger scheduled start/stop events
+SIMPL# Pro class to trigger automatic start/stop events
+
+Includes sample UI. 
 
 ![](screenshot.png)
 
