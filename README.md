@@ -12,7 +12,7 @@ Includes sample UI.
      
 Schedule schedule = new Schedule();
 
-schedule.Init(tp);
+schedule.Init(tp,"filename");
 schedule.AutoStart += new EventHandler(AutoStartTrigger);
 schedule.AutoStop  += new EventHandler(AutoStopTrigger);
 
