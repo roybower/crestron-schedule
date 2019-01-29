@@ -1,9 +1,12 @@
 ﻿using System;
 using System.Text;
-using Crestron.SimplSharp;                      // For Basic SIMPL# Classes
-using Crestron.SimplSharpPro;                   // For Basic SIMPL#Pro classes
-using Crestron.SimplSharpPro.Diagnostics;		// For System Monitor Access
-using Crestron.SimplSharpPro.DeviceSupport;     // For Generic Device Support
+using Crestron.SimplSharp;                     
+using Crestron.SimplSharpPro;                  
+using Crestron.SimplSharpPro.Diagnostics;	
+using Crestron.SimplSharpPro.DeviceSupport;    
+using Crestron.SimplSharp.CrestronXml;
+using Crestron.SimplSharp.CrestronXmlLinq;
+using Crestron.SimplSharp.CrestronIO;                 
 
 
 public class Schedule 
@@ -51,6 +54,8 @@ public class Schedule
     private CTimer HeldEvent;
     private volatile uint buttonHoldTime;
 
+    private volatile string FileName;
+
     public event EventHandler AutoStart;
     public event EventHandler AutoStop;
 
@@ -61,13 +66,13 @@ public class Schedule
     /// Initialise class with touch panel device  
     /// </summary>
     /// <param name="device"></param>
-    public void Init(BasicTriList device)
+    public void Init(BasicTriList device, string filename)
     {
         TP = device;
-        TP.SigChange += new SigEventHandler(TPSigChangeHandler);     
-        UpdateStartStopTimeText();
+        FileName = filename;
+        TP.SigChange += new SigEventHandler(TPSigChangeHandler);
+        ReadDataFromXMLFile();
         StartChecker();
-
         HeldEvent = new CTimer(HeldEventCallback, Timeout.Infinite);
         buttonHoldTime = 200;
     }    
@@ -158,7 +163,7 @@ public class Schedule
     }
             
       
-    private void UpdateStartStopTimeText()
+    private void UpdateUI()
     {
         try
         {
@@ -182,8 +187,7 @@ public class Schedule
             {
                 string stopTime = String.Format("{0}:{1}", stopHour, stopMin);
                 TP.StringInput[stopTimeText].StringValue = stopTime;
-            }        
-
+            }
         }
         catch (Exception ex)
         {
@@ -256,7 +260,7 @@ public class Schedule
                 } break;
         }
 
-        UpdateStartStopTimeText();
+        SaveDataToAnXmlFile(string.Format("{0}\\{1}.xml", Directory.GetApplicationDirectory(), FileName));
         HeldEvent.Reset(buttonHoldTime, Timeout.Infinite);
     }
 
@@ -269,16 +273,16 @@ public class Schedule
             {
                 if (args.Sig.Number >= startMon && args.Sig.Number <= startSun)
                 {
-                    int Day = (int)args.Sig.Number - 1210;
                     TP.BooleanInput[args.Sig.Number].BoolValue = !TP.BooleanInput[args.Sig.Number].BoolValue;
+                    SaveDataToAnXmlFile(string.Format("{0}\\{1}.xml", Directory.GetApplicationDirectory(), FileName));
 
                     return;
                 }
 
                 if (args.Sig.Number >= stopMon && args.Sig.Number <= stopSun)
                 {
-                    int Day = (int)args.Sig.Number - 1220;
                     TP.BooleanInput[args.Sig.Number].BoolValue = !TP.BooleanInput[args.Sig.Number].BoolValue;
+                    SaveDataToAnXmlFile(string.Format("{0}\\{1}.xml", Directory.GetApplicationDirectory(), FileName));
 
                     return;
                 }
@@ -303,6 +307,124 @@ public class Schedule
             Debug(String.Format("Error in TPSigChangeHandler: {0}", ex));
         }
     }
+
+
+
+    #region read/write config
+
+
+
+    XDocument GetScheduleData()
+    {
+        XDocument config = new XDocument(
+        new XDeclaration("1.0", "utf-8", "yes"),
+        new XComment("Scheduler Configuration"),
+        new XElement("configdata",            
+            new XElement("startup",
+                new XElement("startHour",String.Format("{0}", startHour)),
+                new XElement("startMin", String.Format("{0}", startMin)),
+                new XElement("startMon", String.Format("{0}", TP.BooleanInput[startMon].BoolValue)),
+                new XElement("startTue", String.Format("{0}", TP.BooleanInput[startTue].BoolValue)),
+                new XElement("startWed", String.Format("{0}", TP.BooleanInput[startWed].BoolValue)),
+                new XElement("startThu", String.Format("{0}", TP.BooleanInput[startThu].BoolValue)),
+                new XElement("startFri", String.Format("{0}", TP.BooleanInput[startFri].BoolValue)),
+                new XElement("startSat", String.Format("{0}", TP.BooleanInput[startSat].BoolValue)),
+                new XElement("startSun", String.Format("{0}", TP.BooleanInput[startSun].BoolValue))),                      
+            new XElement("shutdown",
+                new XElement("stopHour",String.Format("{0}", stopHour)),
+                new XElement("stopMin", String.Format("{0}", stopMin)),
+                new XElement("stopMon", String.Format("{0}", TP.BooleanInput[stopMon].BoolValue)),
+                new XElement("stopTue", String.Format("{0}", TP.BooleanInput[stopTue].BoolValue)),
+                new XElement("stopWed", String.Format("{0}", TP.BooleanInput[stopWed].BoolValue)),
+                new XElement("stopThu", String.Format("{0}", TP.BooleanInput[stopThu].BoolValue)),
+                new XElement("stopFri", String.Format("{0}", TP.BooleanInput[stopFri].BoolValue)),
+                new XElement("stopSat", String.Format("{0}", TP.BooleanInput[stopSat].BoolValue)),
+                new XElement("stopSun", String.Format("{0}", TP.BooleanInput[stopSun].BoolValue)))
+                ));
+        return config;
+    }
+
+    
+    void SaveDataToAnXmlFile(string filename)
+    {
+        try
+        {
+            XDocument config = GetScheduleData(); // build data
+            config.Save(filename); // save data to file
+            ReadDataFromXMLFile(); // reload it
+        }
+
+        catch (Exception ex)
+        {
+            Debug(String.Format("Error in SaveDataToAnXmlFile: {0}", ex.Message));
+        }
+    }
+
+
+    void ReadDataFromXMLFile()
+    {
+        try
+        {
+            XNamespace xns = "";
+
+            string schedulerFilePath = string.Format("{0}\\{1}.xml", Directory.GetApplicationDirectory(),FileName);
+
+            if (File.Exists(schedulerFilePath))
+            {
+                Debug("Schedule xml file found");
+
+                XmlReader reader = new XmlTextReader(String.Format("{0}\\{1}.xml", Directory.GetApplicationDirectory(),FileName));
+                XDocument retrievedData = XDocument.Load(reader);
+                reader.Close();
+
+                var startupData = retrievedData.Descendants(xns + "startup");
+                foreach (XElement item in startupData)
+                {
+                    startHour = Convert.ToUInt16(item.Element(xns + "startHour").Value);
+                    startMin = Convert.ToUInt16(item.Element(xns + "startMin").Value);
+                    TP.BooleanInput[startMon].BoolValue= Convert.ToBoolean(item.Element(xns + "startMon").Value);
+                    TP.BooleanInput[startTue].BoolValue= Convert.ToBoolean(item.Element(xns + "startTue").Value);
+                    TP.BooleanInput[startWed].BoolValue= Convert.ToBoolean(item.Element(xns + "startWed").Value);
+                    TP.BooleanInput[startThu].BoolValue= Convert.ToBoolean(item.Element(xns + "startThu").Value);
+                    TP.BooleanInput[startFri].BoolValue= Convert.ToBoolean(item.Element(xns + "startFri").Value);
+                    TP.BooleanInput[startSat].BoolValue= Convert.ToBoolean(item.Element(xns + "startSat").Value);
+                    TP.BooleanInput[startSun].BoolValue= Convert.ToBoolean(item.Element(xns + "startSun").Value);
+                }
+
+                var shutdownData = retrievedData.Descendants(xns + "shutdown");
+                foreach (XElement item in shutdownData)
+                {
+                    stopHour = Convert.ToUInt16(item.Element(xns + "stopHour").Value);
+                    stopMin = Convert.ToUInt16(item.Element(xns + "stopMin").Value);
+                    TP.BooleanInput[stopMon].BoolValue = Convert.ToBoolean(item.Element(xns + "stopMon").Value);
+                    TP.BooleanInput[stopTue].BoolValue = Convert.ToBoolean(item.Element(xns + "stopTue").Value);
+                    TP.BooleanInput[stopWed].BoolValue = Convert.ToBoolean(item.Element(xns + "stopWed").Value);
+                    TP.BooleanInput[stopThu].BoolValue = Convert.ToBoolean(item.Element(xns + "stopThu").Value);
+                    TP.BooleanInput[stopFri].BoolValue = Convert.ToBoolean(item.Element(xns + "stopFri").Value);
+                    TP.BooleanInput[stopSat].BoolValue = Convert.ToBoolean(item.Element(xns + "stopSat").Value);
+                    TP.BooleanInput[stopSun].BoolValue = Convert.ToBoolean(item.Element(xns + "stopSun").Value);
+                }
+
+                UpdateUI();
+            }
+            else
+            {
+                Debug("Could not find scheduler xml file");
+            }
+        }
+
+        catch (Exception ex)
+        {
+            Debug(String.Format("Error in ReadDataFromXMLFile: {0}", ex.Message));
+        }
+
+
+    }
+
+    
+
+
+    #endregion  
 
 }
         
